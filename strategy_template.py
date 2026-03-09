@@ -29,8 +29,66 @@ def strategy(player_index: int, history: list, delta: float) -> float:
     -------
     float in [0.0, 1.0]
     """
-    time.sleep(5)
-    return 0.5
+    # Clamp delta to a sensible range
+    try:
+        delta = float(delta)
+    except (TypeError, ValueError):
+        delta = 0.5
+    delta = max(0.0, min(0.999, delta))
+
+    # Baseline cooperative effort: higher when the game is more likely to continue
+    base_coop = 0.55
+    coop_adjust = 0.25 * (delta - 0.5)  # in [-0.125, 0.125] for delta in [0,1]
+    coop_effort = base_coop + coop_adjust
+    coop_effort = max(0.2, min(0.85, coop_effort))
+
+    # Low effort used during punishment / bonus-chasing phases
+    defect_effort = 0.05
+
+    # First period: start cooperatively
+    if not history:
+        return coop_effort
+
+    def _others_efforts(row: list) -> list:
+        return [e for idx, e in enumerate(row) if idx != player_index]
+
+    # Detect the last round in which opponents' efforts were substantially
+    # below our cooperative benchmark.
+    tolerance = 0.15
+    min_expected = max(0.0, coop_effort - tolerance)
+    last_defection_idx = None
+
+    for t, row in enumerate(history):
+        if not isinstance(row, (list, tuple)) or len(row) != 3:
+            continue
+        others = _others_efforts(row)
+        if not others:
+            continue
+        avg_others = sum(others) / len(others)
+        if avg_others < min_expected:
+            last_defection_idx = t
+
+    # Punishment length grows with delta (longer games support longer punishments)
+    punishment_len = 2 + int(4 * delta)  # between 2 and 5 rounds
+    in_punishment = False
+
+    if last_defection_idx is not None:
+        rounds_since_defection = len(history) - 1 - last_defection_idx
+        if rounds_since_defection < punishment_len:
+            in_punishment = True
+
+    # Be willing to forgive if recent behavior returns to cooperative levels
+    if in_punishment:
+        last_row = history[-1]
+        if isinstance(last_row, (list, tuple)) and len(last_row) == 3:
+            recent_others = _others_efforts(last_row)
+            if recent_others:
+                avg_recent = sum(recent_others) / len(recent_others)
+                if avg_recent >= coop_effort - 0.05:
+                    in_punishment = False
+
+    effort = defect_effort if in_punishment else coop_effort
+    return max(0.0, min(1.0, float(effort)))
 
 # ═══════════════════════════════════════════════════════════════════════
 #  DO NOT EDIT BELOW THIS LINE
