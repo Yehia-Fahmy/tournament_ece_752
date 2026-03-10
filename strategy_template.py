@@ -22,13 +22,13 @@ def strategy(player_index: int, history: list, delta: float) -> float:
  
     # First period: contribute maximum effort
     if not history:
-        return 1.0
+        return 0.9
  
     # Otherwise, look at the previous period's efforts
     last_row = history[-1]
     if not isinstance(last_row, (list, tuple)) or len(last_row) != num_players:
         # Fallback if history is malformed: still play max effort
-        return 1.0
+        return 0.9
  
     other_efforts = []
     for idx, e in enumerate(last_row):
@@ -41,10 +41,10 @@ def strategy(player_index: int, history: list, delta: float) -> float:
  
     # If we couldn't parse others' efforts, default to max effort
     if not other_efforts:
-        return 1.0
+        return 0.9
  
-    effort = min(other_efforts)
-    return max(0.0, min(1.0, effort))
+    effort = min(other_efforts) - 0.05
+    return max(0.0, min(0.9, effort))
 
 # ═══════════════════════════════════════════════════════════════════════
 #  DO NOT EDIT BELOW THIS LINE
