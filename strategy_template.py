@@ -13,127 +13,38 @@ SERVER_URL = "http://localhost"
 
 def strategy(player_index: int, history: list, delta: float) -> float:
     """
-    Parameters
-    ----------
-    player_index : int
-        Your position in the group: 0, 1, or 2.
-
-    history : list of lists
-        history[t] = [e0, e1, e2] for period t. Empty on first period.
-
-    delta : float
-        Continuation probability. The game ends after each round with
-        probability 1 - delta.
-
-    Returns
-    -------
-    float in [0.0, 1.0]
+    Simple rule-based strategy:
+    - In the first period, contribute the maximum effort (1.0).
+    - In every subsequent period, contribute the minimum effort
+      that any *other* player chose in the immediately preceding period.
     """
-    # Clamp delta to a sensible range
-    try:
-        delta = float(delta)
-    except (TypeError, ValueError):
-        delta = 0.5
-    delta = max(0.0, min(0.999, delta))
-
     num_players = 3
-    default_coop = 0.45
-
-    # Helper: get recent average effort of a given player over the last k periods
-    def _avg_effort_for(player_idx: int, window: int = 5) -> float:
-        if not history:
-            return default_coop
-        values = []
-        for row in history[-window:]:
-            if isinstance(row, (list, tuple)) and len(row) == num_players:
-                try:
-                    values.append(float(row[player_idx]))
-                except (TypeError, ValueError):
-                    continue
-        if not values:
-            return default_coop
-        return sum(values) / len(values)
-
-    # Predict opponents' efforts as recent averages
-    predicted_others = {}
-    for idx in range(num_players):
+ 
+    # First period: contribute maximum effort
+    if not history:
+        return 1.0
+ 
+    # Otherwise, look at the previous period's efforts
+    last_row = history[-1]
+    if not isinstance(last_row, (list, tuple)) or len(last_row) != num_players:
+        # Fallback if history is malformed: still play max effort
+        return 1.0
+ 
+    other_efforts = []
+    for idx, e in enumerate(last_row):
         if idx == player_index:
             continue
-        predicted_others[idx] = _avg_effort_for(idx)
-
-    # Myopic stage-game best response using the server's payoff function
-    def _best_response() -> float:
-        grid_step = 0.02
-        steps = int(1.0 / grid_step) + 1
-        best_e = 0.0
-        best_payoff = float("-inf")
-
-        for s in range(steps + 1):
-            e_candidate = min(1.0, s * grid_step)
-            efforts = [0.0] * num_players
-            for idx in range(num_players):
-                if idx == player_index:
-                    efforts[idx] = e_candidate
-                else:
-                    efforts[idx] = predicted_others.get(idx, default_coop)
-
-            payoff = _compute_stage_payoff(efforts, player_index)
-            # Break ties in favor of lower effort (cheaper) choices
-            if payoff > best_payoff + 1e-9 or (
-                math.isclose(payoff, best_payoff, rel_tol=1e-9, abs_tol=1e-9)
-                and e_candidate < best_e
-            ):
-                best_payoff = payoff
-                best_e = e_candidate
-
-        return best_e
-
-    best_e = _best_response()
-
-    # Measure how cooperative others have been recently
-    def _recent_avg_others(window: int = 3) -> float:
-        if not history:
-            return default_coop
-        vals = []
-        for row in history[-window:]:
-            if not isinstance(row, (list, tuple)) or len(row) != num_players:
-                continue
-            for idx, e in enumerate(row):
-                if idx == player_index:
-                    continue
-                try:
-                    vals.append(float(e))
-                except (TypeError, ValueError):
-                    continue
-        if not vals:
-            return default_coop
-        return sum(vals) / len(vals)
-
-    recent_others_avg = _recent_avg_others()
-
-    coop_target = 0.45
-    coop_low, coop_high = 0.30, 0.60
-    others_cooperative = coop_low <= recent_others_avg <= coop_high
-    long_game = delta >= 0.8
-
-    effort = best_e
-    if others_cooperative and long_game:
-        # Bias toward a cooperative level when the game is likely to continue
-        bias = 0.6
-        effort = bias * coop_target + (1.0 - bias) * best_e
-
-    # Smooth adjustments over time to avoid wild swings
-    if history:
-        last_row = history[-1]
-        if isinstance(last_row, (list, tuple)) and len(last_row) == num_players:
-            try:
-                last_own = float(last_row[player_index])
-                alpha_new = 0.7  # weight on current recommendation
-                effort = alpha_new * effort + (1.0 - alpha_new) * last_own
-            except (TypeError, ValueError):
-                pass
-
-    return max(0.0, min(1.0, float(effort)))
+        try:
+            other_efforts.append(float(e))
+        except (TypeError, ValueError):
+            continue
+ 
+    # If we couldn't parse others' efforts, default to max effort
+    if not other_efforts:
+        return 1.0
+ 
+    effort = min(other_efforts)
+    return max(0.0, min(1.0, effort))
 
 # ═══════════════════════════════════════════════════════════════════════
 #  DO NOT EDIT BELOW THIS LINE
