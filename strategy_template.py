@@ -13,38 +13,85 @@ SERVER_URL = "http://localhost"
 
 def strategy(player_index: int, history: list, delta: float) -> float:
     """
-    Simple rule-based strategy:
-    - In the first period, contribute the maximum effort (1.0).
-    - In every subsequent period, contribute the minimum effort
-      that any *other* player chose in the immediately preceding period.
+    Myopic best-response strategy:
+    - Use the payoff function from the assignment to approximate, for this
+      period only, which effort level (on a grid) gives the highest expected
+      stage payoff given the *last* observed efforts of the other players.
+    - This ignores longer‑run signaling/discounting and instead focuses on
+      “what effort is best right now, if others keep doing what they just did?”
     """
-    num_players = 3
- 
-    # First period: contribute maximum effort
+    # Bounds used elsewhere in the template
+    EFFORT_MIN = 0.0
+    EFFORT_MAX = 0.9
+
+    # If there is no history yet, we have to guess what others will do.
+    # Use a moderate "cooperative" guess and pick a best response to that.
     if not history:
-        return 0.9
- 
-    # Otherwise, look at the previous period's efforts
-    last_row = history[-1]
-    if not isinstance(last_row, (list, tuple)) or len(last_row) != num_players:
-        # Fallback if history is malformed: still play max effort
-        return 0.9
- 
-    other_efforts = []
-    for idx, e in enumerate(last_row):
-        if idx == player_index:
-            continue
-        try:
-            other_efforts.append(float(e))
-        except (TypeError, ValueError):
-            continue
- 
-    # If we couldn't parse others' efforts, default to max effort
-    if not other_efforts:
-        return 0.9
- 
-    effort = min(other_efforts) - 0.05
-    return max(0.0, min(0.9, effort))
+        guessed_other_effort = 0.6
+        num_players = 3
+        other_efforts = [guessed_other_effort] * (num_players - 1)
+    else:
+        # Otherwise, look at the previous period's efforts
+        last_row = history[-1]
+        if not isinstance(last_row, (list, tuple)):
+            # Fallback if history is malformed: play a safe moderate effort
+            return 0.6
+
+        num_players = len(last_row)
+        other_efforts = []
+        for idx, e in enumerate(last_row):
+            if idx == player_index:
+                continue
+            try:
+                other_efforts.append(float(e))
+            except (TypeError, ValueError):
+                continue
+
+        # If we couldn't parse others' efforts, revert to a safe moderate effort
+        if not other_efforts:
+            return 0.6
+
+    # Approximate one-period payoff for a candidate effort "e",
+    # assuming other players repeat their last efforts.
+    E_others = sum(other_efforts)
+    min_other = min(other_efforts)
+    count_min_other = sum(1 for x in other_efforts if abs(x - min_other) <= 1e-9)
+
+    def one_period_payoff(e: float) -> float:
+        E_total = E_others + e
+        if E_total <= 0:
+            return 0.0
+        S = math.sqrt(E_total)
+
+        # Baseline payoff from the public good and own cost
+        baseline = 0.25 * S - (2.0 / 3.0) * e * e
+
+        # Approximate probability of receiving the "minimum effort" bonus:
+        # if we choose an effort at or below the current minimum, we expect
+        # to share the bonus with everyone currently at that minimum.
+        bonus = 0.0
+        if e <= min_other + 1e-9:
+            bonus = (0.25 * S) / (count_min_other + 1)
+
+        return baseline + bonus
+
+    # Search over a fine grid of feasible efforts and pick the argmax.
+    best_effort = EFFORT_MIN
+    best_value = float("-inf")
+
+    # Slightly finer than 0.1 to avoid being too coarse, but still cheap.
+    step = 0.01
+    grid_points = int((EFFORT_MAX - EFFORT_MIN) / step) + 1
+
+    for k in range(grid_points):
+        e = EFFORT_MIN + k * step
+        value = one_period_payoff(e)
+        if value > best_value:
+            best_value = value
+            best_effort = e
+
+    # Clamp for numerical safety
+    return max(EFFORT_MIN, min(EFFORT_MAX, best_effort))
 
 # ═══════════════════════════════════════════════════════════════════════
 #  DO NOT EDIT BELOW THIS LINE
